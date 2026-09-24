@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班级错题收集小站</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>📖班级错题收集小站</h1>
+
+    <!-- 登录区域 -->
+    <div class="login-box" id="loginArea">
+        <h3>科目登录</h3>
+        <input type="text" id="username" placeholder="输入账号">
+        <input type="password" id="pwd" placeholder="输入密码">
+        <button onclick="login()">登录</button>
+    </div>
+
+    <!-- 提交错题区域：登录成功才显示 -->
+    <div class="input-box" id="submitArea" style="display:none;">
+        <h3>提交你的错题</h3>
+        <input type="text" id="question" placeholder="在这里写题目">
+        <input type="text" id="answer" placeholder="在这里写答案">
+        <button onclick="submitData()">提交错题</button>
+    </div>
+
+    <h2>大家提交的错题：</h2>
+    <div id="list"></div>
+
+<script>
+// 保存登录后的通行证
+let token = "";
+
+// 登录函数
+async function login(){
+    const user = document.getElementById("username").value.trim();
+    const pwd = document.getElementById("pwd").value.trim();
+    const res = await fetch("/api/login",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({username:user,password:pwd})
+    })
+    const result = await res.json();
+    if(result.success){
+        token = result.token;
+        alert("登录成功！可以提交错题啦");
+        // 隐藏登录框，显示提交区域
+        document.getElementById("loginArea").style.display = "none";
+        document.getElementById("submitArea").style.display = "block";
+        loadList();
+    }else{
+        alert("账号或者密码错误！");
+    }
+}
+
+// 提交错题函数（增加token校验 + 空白校验）
+async function submitData(){
+    const q = document.getElementById("question").value.trim();
+    const a = document.getElementById("answer").value.trim();
+    if(!q || !a){
+        alert("题目和答案都不能为空哦！");
+        return;
+    }
+    await fetch("/api/add",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            question:q,
+            answer:a,
+            token:token
+        })
+    })
+    loadList();
+}
+
+// 加载所有错题
+// 加载所有错题
+async function loadList(){
+    const res = await fetch("/api/list");
+    const data = await res.json();
+    let html = "";
+    data.forEach(item=>{
+        html += `<div class="item">
+            <span class="subject">【${item.subject}】</span>
+            <span class="ip-area">📍地区：${item.area}｜IP：${item.ip}</span>
+            <br>
+            题目：${item.question} <br>
+            答案：${item.answer}
+        </div>`
+    })
+    document.getElementById("list").innerHTML = html;
+}
+
+// 打开页面自动加载错题
+loadList();
+</script>
+</body>
+</html>
