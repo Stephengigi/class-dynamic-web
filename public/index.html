@@ -7,54 +7,135 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>📖班级错题收集小站</h1>
+    <div class="container">
+        <h1>📖班级错题收集小站</h1>
 
-    <!-- 登录区域 -->
-    <div class="login-box" id="loginArea">
-        <h3>科目登录</h3>
-        <input type="text" id="username" placeholder="输入账号">
-        <input type="password" id="pwd" placeholder="输入密码">
-        <button onclick="login()">登录</button>
+        <div class="login-box" id="loginArea">
+            <h3>科目登录</h3>
+            <input type="text" id="username" placeholder="输入账号">
+            <input type="password" id="pwd" placeholder="输入密码">
+            <button onclick="login()">登录</button>
+        </div>
+
+        <div id="loggedArea" style="display:none;">
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
+                <span>当前账号：<b id="curUser"></b></span>
+                <button onclick="logout()" class="btn-logout">注销退出</button>
+            </div>
+
+            <div class="input-box">
+                <h3>提交你的错题</h3>
+                <input type="text" id="question" placeholder="在这里写题目">
+                <input type="text" id="answer" placeholder="在这里写答案">
+                <button onclick="submitData()">提交错题</button>
+            </div>
+
+            <div class="filter-box">
+                <h4>筛选错题</h4>
+                <div class="filter-row">
+                    <label>科目：</label>
+                    <select id="selSubject">
+                        <option value="">全部</option>
+                        <option value="语文">语文</option>
+                        <option value="数学">数学</option>
+                        <option value="英语">英语</option>
+                    </select>
+                    <label>开始日期:</label>
+                    <input type="date" id="dateStart">
+                    <label>结束日期:</label>
+                    <input type="date" id="dateEnd">
+                    <button onclick="doFilter()">执行筛选</button>
+                    <button onclick="resetFilter()">重置</button>
+                </div>
+            </div>
+
+            <h2>我的错题列表</h2>
+            <div id="list"></div>
+            <div class="page-box" id="pageBox"></div>
+        </div>
     </div>
-
-    <!-- 提交错题区域：登录成功才显示 -->
-    <div class="input-box" id="submitArea" style="display:none;">
-        <h3>提交你的错题</h3>
-        <input type="text" id="question" placeholder="在这里写题目">
-        <input type="text" id="answer" placeholder="在这里写答案">
-        <button onclick="submitData()">提交错题</button>
-    </div>
-
-    <h2>大家提交的错题：</h2>
-    <div id="list"></div>
 
 <script>
-// 保存登录后的通行证
 let token = "";
+let currentPage = 1;
 
-// 登录函数
+// 密码哈希：优先浏览器原生 SHA-256（localhost/HTTPS 可用），
+// 纯 HTTP 环境自动降级为简易哈希，F12 里看不到明文密码
+async function hashPwd(pwd) {
+  if (window.crypto && crypto.subtle) {
+    try {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pwd));
+      return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+    } catch (e) {}
+  }
+  let h = 5381;
+  for (let i = 0; i < pwd.length; i++) {
+    h = ((h << 5) + h + pwd.charCodeAt(i)) >>> 0;
+  }
+  return "fb_" + h.toString(16);
+}
+
+function forceLogout(){
+    alert("登录状态已过期，请重新登录！");
+    token = "";
+    localStorage.removeItem("token");
+    document.getElementById("loginArea").style.display = "block";
+    document.getElementById("loggedArea").style.display = "none";
+    document.getElementById("list").innerHTML = "";
+    document.getElementById("question").value = "";
+    document.getElementById("answer").value = "";
+}
+
+window.onload = async function(){
+    const savedToken = localStorage.getItem("token");
+    if(savedToken){
+        token = savedToken;
+        document.getElementById("loginArea").style.display="none";
+        document.getElementById("loggedArea").style.display="block";
+        await loadList(1);
+    }
+}
+
 async function login(){
     const user = document.getElementById("username").value.trim();
     const pwd = document.getElementById("pwd").value.trim();
+    if(!user || !pwd){
+        alert("账号和密码都不能为空！");
+        return;
+    }
+    // 提交哈希，不提交明文密码
+    const passwordHash = await hashPwd(pwd);
     const res = await fetch("/api/login",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({username:user,password:pwd})
+        body:JSON.stringify({username:user, passwordHash:passwordHash})
     })
     const result = await res.json();
     if(result.success){
         token = result.token;
-        alert("登录成功！可以提交错题啦");
-        // 隐藏登录框，显示提交区域
+        localStorage.setItem("token", token);
+        alert("登录成功！");
         document.getElementById("loginArea").style.display = "none";
-        document.getElementById("submitArea").style.display = "block";
-        loadList();
+        document.getElementById("loggedArea").style.display = "block";
+        document.getElementById("curUser").innerText = result.user.subject;
+        document.getElementById("question").value = "";
+        document.getElementById("answer").value = "";
+        loadList(1);
     }else{
         alert("账号或者密码错误！");
     }
 }
 
-// 提交错题函数（增加token校验 + 空白校验）
+function logout(){
+    token = "";
+    localStorage.removeItem("token");
+    document.getElementById("loginArea").style.display = "block";
+    document.getElementById("loggedArea").style.display = "none";
+    document.getElementById("list").innerHTML = "";
+    document.getElementById("question").value = "";
+    document.getElementById("answer").value = "";
+}
+
 async function submitData(){
     const q = document.getElementById("question").value.trim();
     const a = document.getElementById("answer").value.trim();
@@ -62,38 +143,86 @@ async function submitData(){
         alert("题目和答案都不能为空哦！");
         return;
     }
-    await fetch("/api/add",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-            question:q,
-            answer:a,
-            token:token
+    try{
+        const resp = await fetch("/api/add",{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({question:q,answer:a,token:token})
         })
-    })
-    loadList();
+        const ret = await resp.json();
+        console.log("提交接口返回：",ret);
+        if(ret.needRelogin === true){
+            forceLogout();
+            return;
+        }
+        if(ret.ok === true){
+            document.getElementById("question").value = "";
+            document.getElementById("answer").value = "";
+            await loadList(1);
+        }else{
+            alert("提交失败：" + (ret.error || "请查看后端控制台日志！"));
+        }
+    }catch(err){
+        alert("网络请求异常！"+err.message);
+        console.error(err);
+    }
 }
 
-// 加载所有错题
-// 加载所有错题
-async function loadList(){
-    const res = await fetch("/api/list");
-    const data = await res.json();
+async function loadList(page){
+    currentPage = page;
+    const subj = document.getElementById("selSubject").value;
+    const sDate = document.getElementById("dateStart").value;
+    const eDate = document.getElementById("dateEnd").value;
+
+    const url = "/api/list?token=" + encodeURIComponent(token) + "&page=" + page + "&filterSubject=" + encodeURIComponent(subj) + "&filterStart=" + encodeURIComponent(sDate) + "&filterEnd=" + encodeURIComponent(eDate);
+    const res = await fetch(url);
+    const json = await res.json();
+    if(json.needRelogin === true){
+        forceLogout();
+        return;
+    }
     let html = "";
-    data.forEach(item=>{
-        html += `<div class="item">
-            <span class="subject">【${item.subject}】</span>
-            <span class="ip-area">📍地区：${item.area}｜IP：${item.ip}</span>
-            <br>
-            题目：${item.question} <br>
-            答案：${item.answer}
-        </div>`
+    if(json.list.length===0){
+        html = '<div class="item">暂无错题数据</div>';
+    }
+    json.list.forEach(function(item){
+        html += '<div class="item">' +
+            '<span class="subject">【' + item.subject + '】</span>' +
+            '<span class="ip-area">📍地区：' + item.area + '｜IP：' + item.ip + '</span>' +
+            '<div class="time-stamp">⏰提交时间：' + (item.created_at || "无时间") + '</div>' +
+            '<div>题目：' + item.question + '</div>' +
+            '<div>答案：' + item.answer + '</div>' +
+        '</div>';
     })
     document.getElementById("list").innerHTML = html;
+    renderPage(json.page, json.totalPage);
 }
 
-// 打开页面自动加载错题
-loadList();
+function renderPage(cur, total){
+    let pHtml = "";
+    if(!total || total <= 1){
+        document.getElementById("pageBox").innerHTML = "";
+        return;
+    }
+    if(cur>1){
+        pHtml += '<button onclick="loadList(' + (cur-1) + ')">上一页</button>';
+    }
+    pHtml += '<span>第' + cur + '/' + total + '页</span>';
+    if(cur < total){
+        pHtml += '<button onclick="loadList(' + (cur+1) + ')">下一页</button>';
+    }
+    document.getElementById("pageBox").innerHTML = pHtml;
+}
+
+function doFilter(){
+    loadList(1);
+}
+function resetFilter(){
+    document.getElementById("selSubject").value = "";
+    document.getElementById("dateStart").value = "";
+    document.getElementById("dateEnd").value = "";
+    loadList(1);
+}
 </script>
 </body>
 </html>
