@@ -59,14 +59,17 @@ function getClientIp(req) {
 // 当前时间，精确到秒：YYYY-MM-DD HH:mm:ss
 function getNowDateTime() {
   const d = new Date();
-  const Y = d.getFullYear();
-  const M = String(d.getMonth() + 1).padStart(2, "0");
-  const D = String(d.getDate()).padStart(2, "0");
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
+  // 获取北京时间（UTC+8）
+  const bjTime = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+  const Y = bjTime.getUTCFullYear();
+  const M = String(bjTime.getUTCMonth() + 1).padStart(2, "0");
+  const D = String(bjTime.getUTCDate()).padStart(2, "0");
+  const h = String(bjTime.getUTCHours()).padStart(2, "0");
+  const m = String(bjTime.getUTCMinutes()).padStart(2, "0");
+  const s = String(bjTime.getUTCSeconds()).padStart(2, "0");
   return Y + "-" + M + "-" + D + " " + h + ":" + m + ":" + s;
 }
+
 
 // 国家码转中文
 const countryMap = {
