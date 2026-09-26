@@ -9,27 +9,27 @@
 <body>
     <div class="container">
         <h1>📖班级错题收集小站</h1>
-
         <div class="login-box" id="loginArea">
             <h3>科目登录</h3>
             <input type="text" id="username" placeholder="输入账号">
             <input type="password" id="pwd" placeholder="输入密码">
             <button onclick="login()">登录</button>
         </div>
-
         <div id="loggedArea" style="display:none;">
             <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;">
                 <span>当前账号：<b id="curUser"></b></span>
                 <button onclick="logout()" class="btn-logout">注销退出</button>
             </div>
-
             <div class="input-box">
                 <h3>提交你的错题</h3>
                 <input type="text" id="question" placeholder="在这里写题目">
                 <input type="text" id="answer" placeholder="在这里写答案">
+                <div>
+                    <input type="file" id="imgInput" accept="image/*">
+                    <div id="imgPreview" style="margin:8px 0;"></div>
+                </div>
                 <button onclick="submitData()">提交错题</button>
             </div>
-
             <div class="filter-box">
                 <h4>筛选错题</h4>
                 <div class="filter-row">
@@ -39,6 +39,10 @@
                         <option value="语文">语文</option>
                         <option value="数学">数学</option>
                         <option value="英语">英语</option>
+                        <option value="历史">历史</option>
+                        <option value="政治">政治</option>
+                        <option value="生物">生物</option>
+                        <option value="物理">物理</option>
                     </select>
                     <label>开始日期:</label>
                     <input type="date" id="dateStart">
@@ -48,31 +52,49 @@
                     <button onclick="resetFilter()">重置</button>
                 </div>
             </div>
-
             <h2>我的错题列表</h2>
             <div id="list"></div>
             <div class="page-box" id="pageBox"></div>
         </div>
     </div>
-
 <script>
 let token = "";
 let currentPage = 1;
+let selectFile = null; // 保存选中的截图文件
 
-// 密码哈希：优先浏览器原生 SHA-256（localhost/HTTPS 可用），
-// 纯 HTTP 环境自动降级为简易哈希，F12 里看不到明文密码
-async function hashPwd(pwd) {
-  if (window.crypto && crypto.subtle) {
-    try {
-      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pwd));
-      return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
-    } catch (e) {}
-  }
-  let h = 5381;
-  for (let i = 0; i < pwd.length; i++) {
-    h = ((h << 5) + h + pwd.charCodeAt(i)) >>> 0;
-  }
-  return "fb_" + h.toString(16);
+// login函数：直接发送原始密码，不做前端哈希
+async function login(){
+    const username = document.getElementById("username").value.trim();
+    const pwdRaw = document.getElementById("pwd").value.trim();
+    if(!username || !pwdRaw){
+        alert("账号和密码不能为空");
+        return;
+    }
+    const resp = await fetch("/api/login",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({username:username, password:pwdRaw})
+    });
+    const ret = await resp.json();
+    if(ret.success){
+        token = ret.token;
+        localStorage.setItem("token",token);
+        document.getElementById("curUser").innerText = ret.user.subject;
+        document.getElementById("loginArea").style.display = "none";
+        document.getElementById("loggedArea").style.display = "block";
+        await loadList(1);
+    }else{
+        alert("登录失败：账号密码错误");
+    }
+}
+
+//退出登录函数
+function logout(){
+    token = "";
+    localStorage.removeItem("token");
+    document.getElementById("loginArea").style.display = "block";
+    document.getElementById("loggedArea").style.display = "none";
+    document.getElementById("list").innerHTML = "";
 }
 
 function forceLogout(){
@@ -94,46 +116,23 @@ window.onload = async function(){
         document.getElementById("loggedArea").style.display="block";
         await loadList(1);
     }
-}
-
-async function login(){
-    const user = document.getElementById("username").value.trim();
-    const pwd = document.getElementById("pwd").value.trim();
-    if(!user || !pwd){
-        alert("账号和密码都不能为空！");
-        return;
+    //====新增图片选择监听====
+    const imgInput = document.getElementById("imgInput");
+    imgInput.onchange = function(e){
+        selectFile = e.target.files[0];
+        const previewDom = document.getElementById("imgPreview");
+        previewDom.innerHTML = "";
+        if(selectFile){
+            const reader = new FileReader();
+            reader.onload = function(ev){
+                const img = document.createElement("img");
+                img.src = ev.target.result;
+                img.style.maxHeight="120px";
+                previewDom.appendChild(img);
+            }
+            reader.readAsDataURL(selectFile);
+        }
     }
-    // 提交哈希，不提交明文密码
-    const passwordHash = await hashPwd(pwd);
-    const res = await fetch("/api/login",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({username:user, passwordHash:passwordHash})
-    })
-    const result = await res.json();
-    if(result.success){
-        token = result.token;
-        localStorage.setItem("token", token);
-        alert("登录成功！");
-        document.getElementById("loginArea").style.display = "none";
-        document.getElementById("loggedArea").style.display = "block";
-        document.getElementById("curUser").innerText = result.user.subject;
-        document.getElementById("question").value = "";
-        document.getElementById("answer").value = "";
-        loadList(1);
-    }else{
-        alert("账号或者密码错误！");
-    }
-}
-
-function logout(){
-    token = "";
-    localStorage.removeItem("token");
-    document.getElementById("loginArea").style.display = "block";
-    document.getElementById("loggedArea").style.display = "none";
-    document.getElementById("list").innerHTML = "";
-    document.getElementById("question").value = "";
-    document.getElementById("answer").value = "";
 }
 
 async function submitData(){
@@ -143,11 +142,17 @@ async function submitData(){
         alert("题目和答案都不能为空哦！");
         return;
     }
+    const fd = new FormData();
+    fd.append("question", q);
+    fd.append("answer", a);
+    fd.append("token", token);
+    if(selectFile){
+        fd.append("imgFile", selectFile);
+    }
     try{
         const resp = await fetch("/api/add",{
             method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({question:q,answer:a,token:token})
+            body: fd
         })
         const ret = await resp.json();
         console.log("提交接口返回：",ret);
@@ -158,6 +163,9 @@ async function submitData(){
         if(ret.ok === true){
             document.getElementById("question").value = "";
             document.getElementById("answer").value = "";
+            document.getElementById("imgInput").value = "";
+            document.getElementById("imgPreview").innerHTML = "";
+            selectFile = null;
             await loadList(1);
         }else{
             alert("提交失败：" + (ret.error || "请查看后端控制台日志！"));
@@ -173,7 +181,6 @@ async function loadList(page){
     const subj = document.getElementById("selSubject").value;
     const sDate = document.getElementById("dateStart").value;
     const eDate = document.getElementById("dateEnd").value;
-
     const url = "/api/list?token=" + encodeURIComponent(token) + "&page=" + page + "&filterSubject=" + encodeURIComponent(subj) + "&filterStart=" + encodeURIComponent(sDate) + "&filterEnd=" + encodeURIComponent(eDate);
     const res = await fetch(url);
     const json = await res.json();
@@ -181,17 +188,23 @@ async function loadList(page){
         forceLogout();
         return;
     }
+    window._rawList = json.list; //保存原始数据，双击编辑查找用
     let html = "";
     if(json.list.length===0){
         html = '<div class="item">暂无错题数据</div>';
     }
     json.list.forEach(function(item){
-        html += '<div class="item">' +
+        let imgHtml = "";
+        if(item.img_url){
+            imgHtml = `<div><img src="${item.img_url}" style="max-height:100px;cursor:pointer;" onclick="window.open('${item.img_url}','_blank')"></div>`;
+        }
+        html += '<div class="item" ondblclick="openEdit('+item.id+')">' +
             '<span class="subject">【' + item.subject + '】</span>' +
             '<span class="ip-area">📍地区：' + item.area + '｜IP：' + item.ip + '</span>' +
             '<div class="time-stamp">⏰提交时间：' + (item.created_at || "无时间") + '</div>' +
             '<div>题目：' + item.question + '</div>' +
             '<div>答案：' + item.answer + '</div>' +
+            imgHtml +
         '</div>';
     })
     document.getElementById("list").innerHTML = html;
@@ -217,11 +230,112 @@ function renderPage(cur, total){
 function doFilter(){
     loadList(1);
 }
+
 function resetFilter(){
     document.getElementById("selSubject").value = "";
     document.getElementById("dateStart").value = "";
     document.getElementById("dateEnd").value = "";
     loadList(1);
+}
+
+//========双击编辑弹窗========
+let editId = null;
+let editSelectFile = null;
+//打开编辑弹窗
+function openEdit(id){
+    const item = window._rawList.find(x=>x.id===id);
+    if(!item) return;
+    editId = id;
+    editSelectFile = null;
+    let modalDom = document.createElement("div");
+    modalDom.id="editModal";
+    modalDom.style.position="fixed";
+    modalDom.style.left="0";modalDom.style.top="0";
+    modalDom.style.width="100vw";modalDom.style.height="100vh";
+    modalDom.style.background="rgba(0,0,0,0.7)";
+    modalDom.style.zIndex="9999";
+    modalDom.style.display="flex";
+    modalDom.style.alignItems="center";
+    modalDom.style.justifyContent="center";
+    modalDom.innerHTML=`
+    <div style="background:#222;padding:24px;border-radius:12px;width:90%;max-width:520px;">
+        <h3>编辑错题（双击条目打开）</h3>
+        <div>
+            <label>题目</label>
+            <input id="editQ" style="width:100%;box-sizing:border-box;padding:8px;margin:6px 0;" value="${item.question}">
+        </div>
+        <div>
+            <label>答案</label>
+            <input id="editA" style="width:100%;box-sizing:border-box;padding:8px;margin:6px 0;" value="${item.answer}">
+        </div>
+        <div>
+            <label>替换截图（不选就保留旧图片）</label>
+            <input type="file" id="editImgInput" accept="image/*">
+            <div id="editPreview" style="margin:8px 0;"></div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:14px;">
+            <button onclick="saveEdit()">保存修改</button>
+            <button onclick="closeEdit()" style="background:#888;">取消</button>
+        </div>
+    </div>
+    `;
+    document.body.appendChild(modalDom);
+    //编辑弹窗图片预览
+    const editImgInput = document.getElementById("editImgInput");
+    editImgInput.onchange = function(e){
+        editSelectFile = e.target.files[0];
+        const pre = document.getElementById("editPreview");
+        pre.innerHTML="";
+        if(editSelectFile){
+            const r = new FileReader();
+            r.onload=ev=>{
+                const im = document.createElement("img");
+                im.src=ev.target.result;
+                im.style.maxHeight="100px";
+                pre.appendChild(im);
+            }
+            r.readAsDataURL(editSelectFile);
+        }
+    }
+}
+//关闭编辑弹窗
+function closeEdit(){
+    const m = document.getElementById("editModal");
+    if(m) m.remove();
+    editId=null;
+    editSelectFile=null;
+}
+//保存编辑提交接口
+async function saveEdit(){
+    if(!editId) return;
+    const q = document.getElementById("editQ").value.trim();
+    const a = document.getElementById("editA").value.trim();
+    if(!q || !a){
+        alert("题目和答案不能为空");
+        return;
+    }
+    const fd = new FormData();
+    fd.append("token",token);
+    fd.append("id",editId);
+    fd.append("question",q);
+    fd.append("answer",a);
+    if(editSelectFile){
+        fd.append("imgFile", editSelectFile);
+    }
+    try{
+        const res = await fetch("/api/edit",{method:"POST", body:fd});
+        const ret = await res.json();
+        if(ret.needRelogin){ forceLogout(); return; }
+        if(ret.ok){
+            closeEdit();
+            await loadList(currentPage);
+            alert("✅编辑保存成功");
+        }else{
+            alert("❌编辑失败："+(ret.error||""));
+        }
+    }catch(err){
+        alert("网络异常"+err.message);
+    }
 }
 </script>
 </body>
